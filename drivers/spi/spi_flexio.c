@@ -15,13 +15,19 @@ LOG_MODULE_REGISTER(spi_flexio, CONFIG_SPI_LOG_LEVEL);
 #include "spi_context.h"
 #include <drivers/clock_control.h>
 #include <fsl_flexio_spi.h>
-
+#include<fsl_xbara.h>
 
 /* Device constant configuration parameters */
 struct spi_flexio_config {
     FLEXIO_Type *flexioBase;
     const struct device *clock_dev;
     clock_control_subsys_t clock_subsys;
+    uint8_t timers[2];
+    uint8_t shifters[2];
+    uint8_t pin_sdo;
+    uint8_t pin_sdi;
+    uint8_t pin_sck;
+    uint8_t pin_csn;
 
     /**
      * IRQ handling: The ISRs for every FlexIO instance are all configured to call the same callback (spi_flexio_isr),
@@ -221,16 +227,16 @@ static int spi_flexio_configure(const struct device *dev,
         return -EINVAL;
     }
 
-    spiDev->SDOPinIndex = 0;
-    spiDev->SCKPinIndex = 1;
-    spiDev->SDIPinIndex = 2;
-    spiDev->CSnPinIndex = 3;
-    spiDev->shifterIndex[0] = 0;
-    spiDev->shifterIndex[1] = 1;
-    spiDev->timerIndex[0] = 0;
-    spiDev->timerIndex[1] = 1;
+    spiDev->SDOPinIndex = config->pin_sdo;
+    spiDev->SCKPinIndex = config->pin_sck;
+    spiDev->SDIPinIndex = config->pin_sdi;
+    spiDev->CSnPinIndex = config->pin_csn;
+    spiDev->shifterIndex[0] = config->shifters[0];
+    spiDev->shifterIndex[1] = config->shifters[1];
+    spiDev->timerIndex[0] = config->timers[0];
+    spiDev->timerIndex[1] = config->timers[1];
 
-    FLEXIO_SPI_MasterInit(&(data->spiDev), &data->master_config, clock_freq);
+    FLEXIO_SPI_MasterInit(spiDev, &data->master_config, clock_freq);
 
     FLEXIO_SPI_MasterTransferCreateHandle(&(data->spiDev), &data->handle, spi_mcux_flexio_master_transfer_callback,
                                           data);
@@ -337,6 +343,12 @@ static const struct spi_driver_api spi_flexio_driver_api = {
         .flexioBase= (FLEXIO_Type *)DT_INST_REG_ADDR(n), \
         .clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
         .clock_subsys = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, name), \
+        .timers = DT_INST_PROP(n, timers), \
+        .shifters = DT_INST_PROP(n, shifters), \
+        .pin_sdo = DT_INST_PROP(n, sdo_pin), \
+        .pin_sdi = DT_INST_PROP(n, sdi_pin), \
+        .pin_sck = DT_INST_PROP(n, sck_pin), \
+        .pin_csn = DT_INST_PROP(n, csn_pin), \
         .irq_config_func = spi_flexio_config_func_##n, \
     }; \
     static struct spi_flexio_data spi_flexio_dev_data_##n = { \

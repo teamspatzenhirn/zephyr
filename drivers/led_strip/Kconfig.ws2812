@@ -26,6 +26,10 @@ config WS2812_STRIP_SPI
 	  The SPI driver is portable, but requires significantly more
 	  memory (1 byte of overhead per bit of pixel data).
 
+config WS2812_STRIP_FLEXIO
+	bool "Enable the FlexIO driver"
+	depends on HAS_MCUX_FLEXIO
+
 config WS2812_STRIP_GPIO
 	bool "Enable the GPIO driver"
 	# Only an Cortex-M0 inline assembly implementation for the nRF51

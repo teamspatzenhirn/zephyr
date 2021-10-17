@@ -14,3 +14,27 @@ properties:
 
   interrupts:
     required: true
+
+  shifters:
+    type: array
+    required: true
+
+  timers:
+    type: array
+    required: true
+
+  sdo-pin:
+    type: int
+    required: true
+
+  sdi-pin:
+    type: int
+    required: true
+
+  sck-pin:
+    type: int
+    required: true
+
+  csn-pin:
+    type: int
+    required: true

@@ -11,9 +11,9 @@
 #include <dt-bindings/clock/imx_ccm.h>
 #include <fsl_clock.h>
 
-#define LOG_LEVEL CONFIG_CLOCK_CONTROL_LOG_LEVEL
+//#define LOG_LEVEL CONFIG_CLOCK_CONTROL_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(clock_control);
+LOG_MODULE_REGISTER(clock_control, LOG_LEVEL_INF);
 
 #ifdef CONFIG_SPI_MCUX_LPSPI
 static const clock_name_t lpspi_clocks[] = {
@@ -24,7 +24,7 @@ static const clock_name_t lpspi_clocks[] = {
 };
 #endif
 
-#ifdef CONFIG_SPI_MCUX_FLEXIO
+//#ifdef CONFIG_HAS_FLEXIO
 // Same for flexio1 and flexio2
 static const clock_name_t flexio_clocks[] = {
         kCLOCK_AudioPllClk, // PLL4 (Audio PLL)
@@ -34,7 +34,7 @@ static const clock_name_t flexio_clocks[] = {
                            // says "This bit should only be used for testing purposes.", and I can't make sense of
                            // CCM_PLL3_BYP, assume pll3 main clock...
 };
-#endif
+//#endif
 
 static int mcux_ccm_on(const struct device *dev,
 			      clock_control_subsys_t sub_system)
@@ -147,7 +147,7 @@ static int mcux_ccm_get_subsys_rate(const struct device *dev,
 		break;
 #endif
 
-#ifdef CONFIG_SPI_MCUX_FLEXIO
+//#ifdef CONFIG_SPI_MCUX_FLEXIO
         case IMX_CCM_FLEXIO1_CLK: {
             uint32_t flexio1_mux = CLOCK_GetMux(kCLOCK_Flexio1Mux);
             clock_name_t flexio1_clock = flexio_clocks[flexio1_mux];
@@ -157,6 +157,7 @@ static int mcux_ccm_get_subsys_rate(const struct device *dev,
             break;
         }
         case IMX_CCM_FLEXIO2_CLK: {
+            LOG_INF("flexio2/3 clock freq");
             uint32_t flexio2_mux = CLOCK_GetMux(kCLOCK_Flexio2Mux);
             clock_name_t flexio2_clock = flexio_clocks[flexio2_mux];
             *rate = CLOCK_GetFreq(flexio2_clock)
@@ -164,7 +165,7 @@ static int mcux_ccm_get_subsys_rate(const struct device *dev,
                     / (CLOCK_GetDiv(kCLOCK_Flexio2Div) + 1);
             break;
         }
-#endif
+//#endif
 
     }
 

@@ -116,9 +116,10 @@ const __imx_boot_ivt_section ivt image_vector_table = {
  */
 static ALWAYS_INLINE void clock_init(void)
 {
-	/* Boot ROM did initialize the XTAL, here we only sets external XTAL
-	 * OSC freq
-	 */
+    printk("clock init\n");
+    /* Boot ROM did initialize the XTAL, here we only sets external XTAL
+     * OSC freq
+     */
 	CLOCK_SetXtalFreq(24000000U);
 	CLOCK_SetRtcXtalFreq(32768U);
 
@@ -181,8 +182,8 @@ static ALWAYS_INLINE void clock_init(void)
 	CLOCK_SetDiv(kCLOCK_LpspiDiv, 7); /* Set SPI divider to 8 */
 #endif
 
-#ifdef CONFIG_SPI_MCUX_FLEXIO
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(flexio1_spi), okay)
+//#ifdef CONFIG_SPI_MCUX_FLEXIO
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(flexio1), okay)
     // Choose fastest available PFD (2) of PLL3, which runs at 508.24MHz. Datasheet:
     //  "The main PLL3 output and its PFD outputs are used as inputs for many clock roots that require constant
     //  frequency, such as UART and other serial interfaces, audio interfaces, etc."
@@ -210,21 +211,23 @@ static ALWAYS_INLINE void clock_init(void)
     CLOCK_EnableClock(kCLOCK_Flexio1);
 #endif
 
-#if  DT_NODE_HAS_STATUS(DT_NODELABEL(flexio1_spi), okay) || DT_NODE_HAS_STATUS(DT_NODELABEL(flexio3_spi), okay)
+#if  DT_NODE_HAS_STATUS(DT_NODELABEL(flexio2), okay) || DT_NODE_HAS_STATUS(DT_NODELABEL(flexio3), okay)
     // FlexIO 2 and 3 share clock selector/divider
+    printk("setting up flexio3 clock\n");
     CLOCK_SetMux(kCLOCK_Flexio2Mux, 1);
     CLOCK_SetDiv(kCLOCK_Flexio2PreDiv, 1);
     CLOCK_SetDiv(kCLOCK_Flexio2Div, 0);
 #endif
 
-#if   DT_NODE_HAS_STATUS(DT_NODELABEL(flexio2_spi), okay)
+#if   DT_NODE_HAS_STATUS(DT_NODELABEL(flexio2), okay)
     CLOCK_EnableClock(kCLOCK_Flexio2);
 #endif
 
-#if   DT_NODE_HAS_STATUS(DT_NODELABEL(flexio3_spi), okay)
+#if   DT_NODE_HAS_STATUS(DT_NODELABEL(flexio3), okay)
+    printk("Enabling flexio3 clock\n");
     CLOCK_EnableClock(kCLOCK_Flexio3);
 #endif
-#endif // CONFIG_SPI_MCUX_FLEXIO
+//#endif // CONFIG_SPI_MCUX_FLEXIO
 
 #ifdef CONFIG_DISPLAY_MCUX_ELCDIF
 	CLOCK_SetMux(kCLOCK_LcdifPreMux, 2);

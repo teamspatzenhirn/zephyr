@@ -1,0 +1,24 @@
+description: |
+  Worldsemi WS2812 LED strip, FlexIO binding
+
+compatible: "worldsemi,ws2812-flexio"
+
+include: [ base.yaml, ws2812.yaml ]
+
+on-bus: flexio
+
+properties:
+  label:
+    required: true
+
+  timer:
+    required: true
+    type: int
+
+  shifter:
+    required: true
+    type: int
+
+  output-pin:
+    required: true
+    type: int
