@@ -44,7 +44,6 @@ struct ws2812_spi_cfg {
 	uint8_t zero_frame;
 	uint8_t num_colors;
 	const uint8_t *color_mapping;
-	uint16_t reset_delay;
     size_t reset_bytes;
 };
 
@@ -79,15 +78,8 @@ static inline bool num_pixels_ok(const struct ws2812_spi_cfg *cfg,
 	bool overflow;
 
 	overflow = size_mul_overflow(num_pixels, cfg->num_colors * 8, &nbytes);
-	return !overflow && (nbytes <= cfg->px_buf_size);
-}
-
-/*
- * Latch current color values on strip and reset its state machines.
- */
-static inline void ws2812_reset_delay(uint16_t delay)
-{
-	k_usleep(delay);
+    /* remember the two reset-phases on each side of the color-data */
+	return !overflow && (nbytes <= cfg->px_buf_size - 2 * cfg->reset_bytes);
 }
 
 static int ws2812_strip_update_rgb(const struct device *dev,
@@ -148,7 +140,6 @@ static int ws2812_strip_update_rgb(const struct device *dev,
 	 * Display the pixel data.
 	 */
 	rc = spi_write_dt(&cfg->bus, &tx);
-	ws2812_reset_delay(cfg->reset_delay);
 
 	return rc;
 }
@@ -194,8 +185,11 @@ static const struct led_strip_driver_api ws2812_spi_api = {
 	.update_channels = ws2812_strip_update_channels,
 };
 
-/* number of zero-bytes needed to reset the led. If those zero-bytes are sent, the assumption of an idle-low SPI MOSI
- * is omitted.
+/* Get the latch/reset delay from the "reset-delay" DT property. */
+#define WS2812_RESET_DELAY(idx) DT_INST_PROP(idx, reset_delay)
+/*
+ * number of zero-bytes needed to reset the LED. If those zero-bytes are sent, the assumption of an idle-low SPI MOSI
+ * is omitted. This value is derived from the "reset-delay" DT property.
  */
 #define WS2812_RESET_BYTES(idx) \
     (WS2812_RESET_DELAY(idx) * DT_INST_PROP(idx, spi_max_frequency) / 8000000)
@@ -220,9 +214,6 @@ static const struct led_strip_driver_api ws2812_spi_api = {
 
 #define WS2812_NUM_COLORS(idx) (DT_INST_PROP_LEN(idx, color_mapping))
 
-/* Get the latch/reset delay from the "reset-delay" DT property. */
-#define WS2812_RESET_DELAY(idx) DT_INST_PROP(idx, reset_delay)
-
 #define WS2812_SPI_DEVICE(idx)						 \
 									 \
 	static uint8_t ws2812_spi_##idx##_px_buf[WS2812_SPI_BUFSZ(idx)]; \
@@ -237,7 +228,6 @@ static const struct led_strip_driver_api ws2812_spi_api = {
 		.zero_frame = WS2812_SPI_ZERO_FRAME(idx),		 \
 		.num_colors = WS2812_NUM_COLORS(idx),			 \
 		.color_mapping = ws2812_spi_##idx##_color_mapping,	 \
-		.reset_delay = WS2812_RESET_DELAY(idx),          \
         .reset_bytes = WS2812_RESET_BYTES(idx)           \
 	};								 \
 									 \
