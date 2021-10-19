@@ -45,6 +45,7 @@ struct ws2812_spi_cfg {
 	uint8_t num_colors;
 	const uint8_t *color_mapping;
 	uint16_t reset_delay;
+    size_t reset_bytes;
 };
 
 static const struct ws2812_spi_cfg *dev_cfg(const struct device *dev)
@@ -103,7 +104,7 @@ static int ws2812_strip_update_rgb(const struct device *dev,
 		.buffers = &buf,
 		.count = 1
 	};
-	uint8_t *px_buf = cfg->px_buf;
+	uint8_t *px_buf = cfg->px_buf + cfg->reset_bytes;
 	size_t i;
 	int rc;
 
@@ -193,6 +194,11 @@ static const struct led_strip_driver_api ws2812_spi_api = {
 	.update_channels = ws2812_strip_update_channels,
 };
 
+/* number of zero-bytes needed to reset the led. If those zero-bytes are sent, the assumption of an idle-low SPI MOSI
+ * is omitted.
+ */
+#define WS2812_RESET_BYTES(idx) \
+    (WS2812_RESET_DELAY(idx) * DT_INST_PROP(idx, spi_max_frequency) / 8000000)
 #define WS2812_SPI_NUM_PIXELS(idx) \
 	(DT_INST_PROP(idx, chain_length))
 #define WS2812_SPI_HAS_WHITE(idx) \
@@ -202,7 +208,7 @@ static const struct led_strip_driver_api ws2812_spi_api = {
 #define WS2812_SPI_ZERO_FRAME(idx) \
 	(DT_INST_PROP(idx, spi_zero_frame))
 #define WS2812_SPI_BUFSZ(idx) \
-	(WS2812_NUM_COLORS(idx) * 8 * WS2812_SPI_NUM_PIXELS(idx))
+	(WS2812_NUM_COLORS(idx) * 8 * WS2812_SPI_NUM_PIXELS(idx) + 2 * WS2812_RESET_BYTES(idx))
 
 /*
  * Retrieve the channel to color mapping (e.g. RGB, BGR, GRB, ...) from the
@@ -231,7 +237,8 @@ static const struct led_strip_driver_api ws2812_spi_api = {
 		.zero_frame = WS2812_SPI_ZERO_FRAME(idx),		 \
 		.num_colors = WS2812_NUM_COLORS(idx),			 \
 		.color_mapping = ws2812_spi_##idx##_color_mapping,	 \
-		.reset_delay = WS2812_RESET_DELAY(idx),			 \
+		.reset_delay = WS2812_RESET_DELAY(idx),          \
+        .reset_bytes = WS2812_RESET_BYTES(idx)           \
 	};								 \
 									 \
 	DEVICE_DT_INST_DEFINE(idx,					 \
