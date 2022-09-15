@@ -1,0 +1,10 @@
+# Copyright (c) 2021 Team Spatzenhirn
+# SPDX-License-Identifier: Apache-2.0
+
+config PWM3389
+	bool "PWM3389 motion sensor"
+	default y
+	depends on DT_HAS_PIXART_PWM3389_ENABLED
+	depends on SPI
+	help
+	  Enable PWM3389 motion sensor.

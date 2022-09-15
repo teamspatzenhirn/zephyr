@@ -198,6 +198,8 @@ source "drivers/sensor/odsl8/Kconfig"
 
 source "drivers/sensor/pms7003/Kconfig"
 
+source "drivers/sensor/pwm3389/Kconfig"
+
 source "drivers/sensor/qdec_nrfx/Kconfig"
 
 source "drivers/sensor/qdec_sam/Kconfig"
