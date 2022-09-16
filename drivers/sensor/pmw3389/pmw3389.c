@@ -11,8 +11,18 @@
 
 LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 
+#define REG_Motion     0x02
+#define BIT_Motion_MOT 7
+
+#define REG_Delta_X_L	   0x03
+#define REG_Delta_X_H	   0x04
+#define REG_Delta_Y_L	   0x05
+#define REG_Delta_Y_H	   0x06
 #define REG_Power_Up_Reset 0x3A
 #define REG_Motion_Burst   0x50
+
+#define REG_Product_ID	    0x00
+#define Expected_Product_ID 0x47
 
 // Min command interval of write commands
 #define T_SWW_US 180
@@ -52,9 +62,12 @@ LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 
 struct pmw3389_config {
 	struct spi_dt_spec spi;
+	int resolution_cpm; // [counts/m]
 };
 
 struct pmw3389_data {
+	int16_t delta_x;
+	int16_t delta_y;
 };
 
 /**
@@ -211,19 +224,90 @@ int pmw3389_init(const struct device *dev)
 
 	// 11. Load configuration for other registers.
 
+	// Verify communication
+	k_busy_wait(T_SWR_US - 4);
+	uint8_t received_product_id = read_register(spec, REG_Product_ID);
+	if (received_product_id != Expected_Product_ID) {
+		LOG_ERR("Read product ID %#x, but expected %#x, could not verify communication "
+			"with sensor!",
+			received_product_id, Expected_Product_ID);
+		return -1; // TODO: Proper error code
+	}
+	LOG_INF("Verified product ID!");
+
 	spi_release_dt(spec);
 	LOG_INF("Done!");
 	return 0;
 }
 
+static bool is_bit_set(uint8_t value, uint8_t index)
+{
+	return (value & (1 << index)) != 0;
+}
+
+static int16_t signed_16_from_parts(uint8_t low, uint8_t high)
+{
+	int res = low;
+	res |= high << 8;
+	return (int16_t)res;
+}
+
 int pmw3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
+	if (chan != SENSOR_CHAN_PMW3389_DISTANCE_X && chan != SENSOR_CHAN_PMW3389_DISTANCE_Y) {
+		return -EINVAL;
+	}
+
+	const struct pmw3389_config *config = dev->config;
+	const struct spi_dt_spec *spec = &config->spi;
+
+	struct pmw3389_data *data = dev->data;
+
+	// For first motion read, write any value to Motion register first (?)
+	write_register(spec, REG_Motion, 0x00);
+	k_busy_wait(T_SWR_US - 4);
+
+	uint8_t motion = read_register(spec, REG_Motion);
+	if (is_bit_set(motion, BIT_Motion_MOT)) {
+		// Motion has occurred!
+		uint8_t results[4] = {0};
+		uint8_t addresses[4] = {REG_Delta_X_L, REG_Delta_X_H, REG_Delta_Y_L, REG_Delta_Y_H};
+		k_busy_wait(T_SRR_US);
+		read_multiple(spec, addresses, 4, results);
+		data->delta_x = signed_16_from_parts(results[0], results[1]);
+		data->delta_y = signed_16_from_parts(results[2], results[3]);
+	} else {
+		// No motion has occurred
+		data->delta_x = 0;
+		data->delta_y = 0;
+	}
+
 	return 0;
 }
 
 int pmw3389_channel_get(const struct device *dev, enum sensor_channel chan,
 			struct sensor_value *val)
 {
+	const struct pmw3389_config *config = dev->config;
+	const struct pmw3389_data *data = dev->data;
+
+	int16_t counts = 0;
+
+	switch ((int)chan) {
+	case SENSOR_CHAN_PMW3389_DISTANCE_X:
+		counts = data->delta_x;
+		break;
+	case SENSOR_CHAN_PMW3389_DISTANCE_Y:
+		counts = data->delta_y;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	// TODO: fix conversion fuckups
+	val->val1 = counts / config->resolution_cpm;
+	val->val2 = (1000000 * counts / config->resolution_cpm) % 1000000;
+
 	return 0;
 }
 
