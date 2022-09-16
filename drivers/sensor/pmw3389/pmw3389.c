@@ -308,6 +308,14 @@ int pmw3389_channel_get(const struct device *dev, enum sensor_channel chan,
 	val->val1 = counts / config->resolution_cpm;
 	val->val2 = (1000000 * counts / config->resolution_cpm) % 1000000;
 
+	/*
+	 * 	Max counts: 32767
+		Resolution: 50 CPI to 16000 CPI: 1968.505 to 629921.6 CPM
+		m/count: 0.000507999726 to 1.58749914e-6
+		µm/count: 507.999726 to 1.58749914
+		nm/count: 507999.726 to 1587.49914
+		*/
+
 	return 0;
 }
 
