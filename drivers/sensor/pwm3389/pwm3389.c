@@ -7,9 +7,48 @@
 #include "pwm3389.h"
 
 #include <zephyr/drivers/spi.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(pwm3389, LOG_LEVEL_INF);
 
 #define REG_Power_Up_Reset 0x3A
 #define REG_Motion_Burst   0x50
+
+// Min command interval of write commands
+#define T_SWW_US 180
+
+// Min byte interval for read after write (..., data_write_1, address_read_2, ...)
+#define T_SWR_US 180
+
+// Min byte interval after read (..., data_read_1, address_2, ...)
+#define T_SRW_US 20
+#define T_SRR_US 20
+
+// Min delay between address and data bytes for read
+#define T_SRAD_US 160
+
+// Min delay between address and data bytes for burst motion read
+#define T_SRAD_MOTBR_US 35
+
+/*
+ * Chip SPI Interface description
+ *
+ * Whenever NCS goes high, the entire transaction is aborted, the serial port will be reset.
+ * All transactions should be framed by NCS (do not leave NCS low if not used)
+ * NCS must be raised after burst-mode transaction, or to terminate burst-mode.
+ *
+ * Chip reads MOSI on SCLK rising edge.
+ * Chip writes MISO on SCLK falling edge.
+ *
+ * Write Operation:
+ * Pull NCS low, delay 120ns
+ * 1-bit, 7-bit address, 8-bit data.
+ * (delay T_SCLK_NCS_WRITE (35us), pull NCS high)
+ *
+ * Read Operation:
+ * 0-bit, 7-bit address, T_SRAD delay, 8-bit data
+ * (delay T_SCLK_NCS_READ (120ns), pull NCS high)
+ */
 
 struct pwm3389_config {
 	struct spi_dt_spec spi;
@@ -21,27 +60,33 @@ struct pwm3389_data {
 /**
  * @param reg 7-bit register address
  */
-void write_register(const struct device *dev, uint8_t reg, uint8_t data)
+void write_register(const struct spi_dt_spec *spec, uint8_t reg, uint8_t data)
 {
-	const struct pwm3389_config *config = dev->config;
-
 	// Set first address bit to 1 to indicate write
 	uint8_t tx_data[] = {reg | 0b10000000, data};
 	struct spi_buf tx_buffer = {.buf = tx_data, .len = sizeof(tx_data)};
 	struct spi_buf_set tx_buffer_set = {.buffers = &tx_buffer, .count = 1};
 
-	spi_write_dt(&config->spi, &tx_buffer_set);
+	spi_write_dt(spec, &tx_buffer_set);
 }
 
-void send_byte(const struct device *dev, uint8_t data)
+static void send_byte(const struct spi_dt_spec *spec, uint8_t data)
 {
-	const struct pwm3389_config *config = dev->config;
-
 	uint8_t tx_data[] = {data};
 	struct spi_buf tx_buffer = {.buf = tx_data, .len = sizeof(tx_data)};
 	struct spi_buf_set tx_buffer_set = {.buffers = &tx_buffer, .count = 1};
 
-	spi_write_dt(&config->spi, &tx_buffer_set);
+	spi_write_dt(spec, &tx_buffer_set);
+}
+
+static uint8_t receive_byte(const struct spi_dt_spec *spec)
+{
+	uint8_t data;
+	struct spi_buf rx_buffer = {.buf = &data, .len = 1};
+	struct spi_buf_set rx_buffer_set = {.buffers = &rx_buffer, .count = 1};
+
+	spi_read_dt(spec, &rx_buffer_set);
+	return data;
 }
 
 void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t *out)
@@ -49,11 +94,11 @@ void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t
 	const struct pwm3389_config *config = dev->config;
 
 	// Write any value to Motion_Burst register
-	write_register(dev, REG_Motion_Burst, 0);
+	write_register(&config->spi, REG_Motion_Burst, 0);
 
 	// Lower NCS
 	// Send Motion_Burst address (0x50).
-	send_byte(dev, REG_Motion_Burst);
+	send_byte(&config->spi, REG_Motion_Burst);
 
 	// Wait for t_SRAD_MOTBR
 	k_busy_wait(35);
@@ -74,24 +119,100 @@ void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t
 	// TODO: t_SRAD etc
 }
 
+uint8_t read_register(const struct spi_dt_spec *spec, uint8_t addr)
+{
+	// Write address
+	send_byte(spec, addr & ~(1 << 7));
+	// Wait T_SRAD
+	k_busy_wait(T_SRAD_US);
+	// Read Data
+	return receive_byte(spec);
+}
+
+/**
+ * Read multiple registers
+ */
+void read_multiple(const struct spi_dt_spec *spec, const uint8_t addresses[], int nr_addresses,
+		   uint8_t data_out[])
+{
+	for (int i = 0; i < nr_addresses; i++) {
+		data_out[i] = read_register(spec, addresses[i]);
+		// Wait T_SRR if not last
+		if (i != nr_addresses - 1) {
+			k_busy_wait(T_SRR_US);
+		}
+	}
+
+	// T_SCLK_NCS_READ: omitted because small (120ns)
+	spi_release_dt(spec);
+}
+
 int pwm3389_init(const struct device *dev)
 {
+	LOG_INF("Initializing PWM3389");
+	const struct pwm3389_config *config = dev->config;
+
+	const struct spi_dt_spec *spec = &config->spi;
+
+	// SPI: Manual CS control, Zephyr does delay between pulling NCS low and start, but does not
+	//  wait after transmission. NCS is not pulled high automatically, as configured
+
+	// 1. Apply Power
+	// 2. Drive NCS high, then low (done by driver)
 	// 3. Write 0x5A to Power_Up_Reset register
-	write_register(dev, REG_Power_Up_Reset, 0x5A);
+	LOG_INF("Resetting");
+	write_register(spec, REG_Power_Up_Reset, 0x5A);
+	spi_release_dt(spec);
 	// 4. Wait for at least 50ms.
-	k_busy_wait(50000); // TODO: dont
+	k_sleep(K_MSEC(50));
 
 	// 5. Read from registers 0x02, 0x03, 0x04, 0x05 and 0x06 one time regardless of the motion
 	// pin state.
+	LOG_INF("Reading 0x02-0x06");
+	uint8_t addresses[] = {0x02, 0x03, 0x04, 0x05, 0x06};
+	uint8_t dummy_read[sizeof(addresses)];
+	read_multiple(spec, addresses, sizeof(addresses), dummy_read);
 
-	// * Perform SROM download [Refer to 7.1 SROM Download].
-	// * Write to register 0x3D with value 0x80.
-	// * Read register 0x3D at 1ms interval until value 0xC0 is obtained or read up to 55ms.
-	// This register read interval must be carried out at 1ms interval with timing tolerance of
-	// +/- 1%.
-	// * Write to register 0x3D with value 0x00.
-	// * Write 0x20 to register 0x10
-	// * Load configuration for other registers.
+	// (6. Perform SROM download [Refer to 7.1 SROM Download].)
+
+	// 7. Write to register 0x3D with value 0x80.
+	// Last op was read if SROM DL was not performed -> wait T_SRW
+	k_busy_wait(T_SRW_US);
+	write_register(spec, 0x3D, 0x80);
+
+	// Wait such that the time between last address bit of the next read and last data bit is
+	// > T_SWR: Assume clock frequency is at the maximum of 2MHz -> 4us for 8 address bits
+	// The missing SRR here are waited in the first loop iteration below.
+	k_busy_wait(T_SWR_US - 4);
+
+	// 8. Read register 0x3D at 1ms interval until value 0xC0 is obtained or read up to
+	//    55ms. This register read interval must be carried out at 1ms interval with timing
+	//    tolerance of +/- 1%.
+	LOG_INF("Waiting for 0x3D");
+	while (true) {
+		// Do not wait T_SRR since the 1ms is way longer anyway
+		uint8_t result_3D = read_register(spec, 0x3D);
+		LOG_INF("Got %#x", result_3D);
+		if (result_3D == 0xC0) {
+			break;
+		}
+		k_busy_wait(1000);
+	}
+
+	// 9. Write to register 0x3D with value 0x00.
+	k_busy_wait(T_SRW_US);
+	write_register(spec, 0x3D, 0x00);
+
+	// 10. Write 0x20 to register 0x10
+	// 0x10 is Config2, 0x20=0b00100000 enables the REST mode and sets CPI to addect both X and
+	// Y
+	k_busy_wait(T_SWW_US - 4);
+	write_register(spec, 0x10, 0x20);
+
+	// 11. Load configuration for other registers.
+
+	spi_release_dt(spec);
+	LOG_INF("Done!");
 	return 0;
 }
 
@@ -114,8 +235,11 @@ static const struct sensor_driver_api pwm3389_api = {
 #define PWM3389_INIT(n)                                                                            \
 	static struct pwm3389_data pwm3389_data_##n;                                               \
 	static const struct pwm3389_config pwm3389_config_##n = {                                  \
-		.spi = SPI_DT_SPEC_INST_GET(                                                       \
-			n, SPI_OP_MODE_MASTER | SPI_WORD_SET(8U) | SPI_HOLD_ON_CS, 0U),            \
+		.spi = SPI_DT_SPEC_INST_GET(n,                                                     \
+					    SPI_OP_MODE_MASTER | SPI_WORD_SET(8U) |                \
+						    SPI_HOLD_ON_CS | SPI_MODE_CPOL |               \
+						    SPI_MODE_CPHA,                                 \
+					    0U),                                                   \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(n, &pwm3389_init, NULL, &pwm3389_data_##n, &pwm3389_config_##n,      \
 			      POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &pwm3389_api);
