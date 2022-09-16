@@ -5,6 +5,6 @@
 description: |
   Motion Sensor
 
-compatible: "pixart,pwm3389"
+compatible: "pixart,pmw3389"
 
 include: spi-device.yaml

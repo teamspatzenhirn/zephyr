@@ -2,14 +2,14 @@
 // Created by jonasotto on 9/15/22.
 //
 
-#define DT_DRV_COMPAT pixart_pwm3389
+#define DT_DRV_COMPAT pixart_pmw3389
 
-#include "pwm3389.h"
+#include "pmw3389.h"
 
 #include <zephyr/drivers/spi.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(pwm3389, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 
 #define REG_Power_Up_Reset 0x3A
 #define REG_Motion_Burst   0x50
@@ -50,11 +50,11 @@ LOG_MODULE_REGISTER(pwm3389, LOG_LEVEL_INF);
  * (delay T_SCLK_NCS_READ (120ns), pull NCS high)
  */
 
-struct pwm3389_config {
+struct pmw3389_config {
 	struct spi_dt_spec spi;
 };
 
-struct pwm3389_data {
+struct pmw3389_data {
 };
 
 /**
@@ -91,7 +91,7 @@ static uint8_t receive_byte(const struct spi_dt_spec *spec)
 
 void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t *out)
 {
-	const struct pwm3389_config *config = dev->config;
+	const struct pmw3389_config *config = dev->config;
 
 	// Write any value to Motion_Burst register
 	write_register(&config->spi, REG_Motion_Burst, 0);
@@ -147,10 +147,10 @@ void read_multiple(const struct spi_dt_spec *spec, const uint8_t addresses[], in
 	spi_release_dt(spec);
 }
 
-int pwm3389_init(const struct device *dev)
+int pmw3389_init(const struct device *dev)
 {
-	LOG_INF("Initializing PWM3389");
-	const struct pwm3389_config *config = dev->config;
+	LOG_INF("Initializing PMW3389");
+	const struct pmw3389_config *config = dev->config;
 
 	const struct spi_dt_spec *spec = &config->spi;
 
@@ -216,32 +216,32 @@ int pwm3389_init(const struct device *dev)
 	return 0;
 }
 
-int pwm3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
+int pmw3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
 	return 0;
 }
 
-int pwm3389_channel_get(const struct device *dev, enum sensor_channel chan,
+int pmw3389_channel_get(const struct device *dev, enum sensor_channel chan,
 			struct sensor_value *val)
 {
 	return 0;
 }
 
-static const struct sensor_driver_api pwm3389_api = {
-	.sample_fetch = pwm3389_sample_fetch,
-	.channel_get = pwm3389_channel_get,
+static const struct sensor_driver_api pmw3389_api = {
+	.sample_fetch = pmw3389_sample_fetch,
+	.channel_get = pmw3389_channel_get,
 };
 
-#define PWM3389_INIT(n)                                                                            \
-	static struct pwm3389_data pwm3389_data_##n;                                               \
-	static const struct pwm3389_config pwm3389_config_##n = {                                  \
+#define PMW3389_INIT(n)                                                                            \
+	static struct pmw3389_data pmw3389_data_##n;                                               \
+	static const struct pmw3389_config pmw3389_config_##n = {                                  \
 		.spi = SPI_DT_SPEC_INST_GET(n,                                                     \
 					    SPI_OP_MODE_MASTER | SPI_WORD_SET(8U) |                \
 						    SPI_HOLD_ON_CS | SPI_MODE_CPOL |               \
 						    SPI_MODE_CPHA,                                 \
 					    0U),                                                   \
 	};                                                                                         \
-	DEVICE_DT_INST_DEFINE(n, &pwm3389_init, NULL, &pwm3389_data_##n, &pwm3389_config_##n,      \
-			      POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &pwm3389_api);
+	DEVICE_DT_INST_DEFINE(n, &pmw3389_init, NULL, &pmw3389_data_##n, &pmw3389_config_##n,      \
+			      POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &pmw3389_api);
 
-DT_INST_FOREACH_STATUS_OKAY(PWM3389_INIT)
+DT_INST_FOREACH_STATUS_OKAY(PMW3389_INIT)
