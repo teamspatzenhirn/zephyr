@@ -18,11 +18,15 @@ LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 #define REG_Delta_X_H	   0x04
 #define REG_Delta_Y_L	   0x05
 #define REG_Delta_Y_H	   0x06
+#define REG_Resolution_L   0x0E
+#define REG_Resolution_H   0x0F
 #define REG_Power_Up_Reset 0x3A
 #define REG_Motion_Burst   0x50
 
 #define REG_Product_ID	    0x00
 #define Expected_Product_ID 0x47
+
+// TODO: Check timing interval vs delay
 
 // Min command interval of write commands
 #define T_SWW_US 180
@@ -173,7 +177,7 @@ int pmw3389_init(const struct device *dev)
 	// 1. Apply Power
 	// 2. Drive NCS high, then low (done by driver)
 	// 3. Write 0x5A to Power_Up_Reset register
-	LOG_INF("Resetting");
+	LOG_INF("Resetting device");
 	write_register(spec, REG_Power_Up_Reset, 0x5A);
 	spi_release_dt(spec);
 	// 4. Wait for at least 50ms.
@@ -181,7 +185,6 @@ int pmw3389_init(const struct device *dev)
 
 	// 5. Read from registers 0x02, 0x03, 0x04, 0x05 and 0x06 one time regardless of the motion
 	// pin state.
-	LOG_INF("Reading 0x02-0x06");
 	uint8_t addresses[] = {0x02, 0x03, 0x04, 0x05, 0x06};
 	uint8_t dummy_read[sizeof(addresses)];
 	read_multiple(spec, addresses, sizeof(addresses), dummy_read);
@@ -201,7 +204,6 @@ int pmw3389_init(const struct device *dev)
 	// 8. Read register 0x3D at 1ms interval until value 0xC0 is obtained or read up to
 	//    55ms. This register read interval must be carried out at 1ms interval with timing
 	//    tolerance of +/- 1%.
-	LOG_INF("Waiting for 0x3D");
 	while (true) {
 		// Do not wait T_SRR since the 1ms is way longer anyway
 		uint8_t result_3D = read_register(spec, 0x3D);
@@ -224,7 +226,24 @@ int pmw3389_init(const struct device *dev)
 
 	// 11. Load configuration for other registers.
 
+	// Set resolution
+	LOG_INF("Configuring resolution: %dcpi", config->resolution_cpi);
+	if (config->resolution_cpi < 50 || config->resolution_cpi > 16000) {
+		LOG_ERR("Resolution of %d is out of range [%d, %d]", config->resolution_cpi, 50,
+			16000);
+		return -EINVAL;
+	}
+	if (config->resolution_cpi % 50 != 0) {
+		LOG_WRN("Resolution of %d is not a multiple of 50cpi!", config->resolution_cpi);
+	}
+	uint16_t resolution = config->resolution_cpi / 50;
+	k_busy_wait(T_SWW_US - 4);
+	write_register(spec, REG_Resolution_H, resolution >> 8);
+	k_busy_wait(T_SWW_US - 4);
+	write_register(spec, REG_Resolution_L, resolution & 0xFF);
+
 	// Verify communication
+	LOG_INF("Verifying communication by reading product ID");
 	k_busy_wait(T_SWR_US - 4);
 	uint8_t received_product_id = read_register(spec, REG_Product_ID);
 	if (received_product_id != Expected_Product_ID) {
@@ -324,7 +343,7 @@ static const struct sensor_driver_api pmw3389_api = {
 						    SPI_HOLD_ON_CS | SPI_MODE_CPOL |               \
 						    SPI_MODE_CPHA,                                 \
 					    0U),                                                   \
-	};                                                                                         \
+		.resolution_cpi = DT_INST_PROP(n, resolution)};                                    \
 	DEVICE_DT_INST_DEFINE(n, &pmw3389_init, NULL, &pmw3389_data_##n, &pmw3389_config_##n,      \
 			      POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &pmw3389_api);
 
