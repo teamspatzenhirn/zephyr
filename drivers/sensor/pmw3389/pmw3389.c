@@ -128,39 +128,49 @@ uint8_t read_register(const struct spi_dt_spec *spec, uint8_t addr)
 	return receive_byte(spec);
 }
 
-void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t *out)
+/**
+ * Burst Motion Read. Reads the following registers (up to specified number):
+ * BYTE[00] = Motion
+ * BYTE[01] = Observation
+ * BYTE[02] = Delta_X_L
+ * BYTE[03] = Delta_X_H
+ * BYTE[04] = Delta_Y_L
+ * BYTE[05] = Delta_Y_H
+ * BYTE[06] = SQUAL
+ * BYTE[07] = RawData_Sum
+ * BYTE[08] = Maximum_RawData
+ * BYTE[09] = Minimum_Rawdata
+ * BYTE[10] = Shutter_Upper
+ * BYTE[11] = Shutter_Lower
+ * @param dev
+ * @param out
+ * @param nr_bytes
+ */
+void burst_read_motion(const struct spi_dt_spec *spec, uint8_t out[], int nr_bytes)
 {
-	const struct pmw3389_config *config = dev->config;
+	// 1. Write any value to Motion_Burst register
+	write_register(spec, REG_Motion_Burst, 0);
 
-	// Write any value to Motion_Burst register
-	write_register(&config->spi, REG_Motion_Burst, 0);
+	// 2. Lower NCS
+	// (is already low)
 
-	// Lower NCS
-	// Send Motion_Burst address (0x50).
-	send_byte(&config->spi, REG_Motion_Burst);
+	// 3. Send Motion_Burst address (0x50).
+	send_byte(spec, REG_Motion_Burst);
 
-	// Wait for t_SRAD_MOTBR
-	k_busy_wait(35);
+	// 4. Wait for t_SRAD_MOTBR
+	k_busy_wait(T_SRAD_MOTBR_US);
 
-	// Start reading SPI data continuously up to 12bytes.
-	uint8_t tx_data[12] = {0};
-	struct spi_buf tx_buffer = {.buf = tx_data, .len = sizeof(tx_data)};
-	struct spi_buf_set tx_buffer_set = {.buffers = &tx_buffer, .count = 1};
-
+	// 5. Start reading SPI data continuously up to 12bytes.
 	struct spi_buf rx_buffers = {.buf = out, .len = 12};
 	struct spi_buf_set rx_buffer_set = {.buffers = &rx_buffers, .count = 1};
-	spi_transceive_dt(&config->spi, &tx_buffer_set, &rx_buffer_set);
+	spi_transceive_dt(spec, NULL, &rx_buffer_set);
 
 	// Motion burst may be terminated by pulling NCS high for at least t_BEXIT
-	spi_release_dt(&config->spi);
-	// 500ns k_usleep();
-
-	// TODO: t_SRAD etc
+	spi_release_dt(spec);
 }
 
-
 /**
- * Read multiple registers
+ * Read multiple registers, releases SPI after!
  */
 void read_multiple(const struct spi_dt_spec *spec, const uint8_t addresses[], int nr_addresses,
 		   uint8_t data_out[])
@@ -282,17 +292,8 @@ static int16_t signed_16_from_parts(uint8_t low, uint8_t high)
 	return (int16_t)res;
 }
 
-int pmw3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
+void fetch_manual(const struct spi_dt_spec *spec, int16_t *delta_x, int16_t *delta_y)
 {
-	if (chan != SENSOR_CHAN_PMW3389_DISTANCE_X && chan != SENSOR_CHAN_PMW3389_DISTANCE_Y) {
-		return -EINVAL;
-	}
-
-	const struct pmw3389_config *config = dev->config;
-	const struct spi_dt_spec *spec = &config->spi;
-
-	struct pmw3389_data *data = dev->data;
-
 	// For first motion read, write any value to Motion register first (?)
 	write_register(spec, REG_Motion, 0x00);
 	k_busy_wait(DELAY_WRITE_READ);
@@ -304,13 +305,42 @@ int pmw3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
 		uint8_t addresses[4] = {REG_Delta_X_L, REG_Delta_X_H, REG_Delta_Y_L, REG_Delta_Y_H};
 		k_busy_wait(DELAY_READ_READ);
 		read_multiple(spec, addresses, 4, results);
-		data->delta_x = signed_16_from_parts(results[0], results[1]);
-		data->delta_y = signed_16_from_parts(results[2], results[3]);
+		*delta_x = signed_16_from_parts(results[0], results[1]);
+		*delta_y = signed_16_from_parts(results[2], results[3]);
 	} else {
 		// No motion has occurred
-		data->delta_x = 0;
-		data->delta_y = 0;
+		*delta_x = 0;
+		*delta_y = 0;
 	}
+
+	spi_release_dt(spec);
+}
+
+void fetch_burst(const struct spi_dt_spec *spec, int16_t *delta_x, int16_t *delta_y)
+{
+	uint8_t data[6] = {0};
+	burst_read_motion(spec, data, 6);
+	if (is_bit_set(data[0], BIT_Motion_MOT)) {
+		*delta_x = signed_16_from_parts(data[2], data[3]);
+		*delta_y = signed_16_from_parts(data[4], data[5]);
+	} else {
+		*delta_x = 0;
+		*delta_y = 0;
+	}
+}
+
+int pmw3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
+{
+	if (chan != SENSOR_CHAN_PMW3389_DISTANCE_X && chan != SENSOR_CHAN_PMW3389_DISTANCE_Y) {
+		return -EINVAL;
+	}
+
+	const struct pmw3389_config *config = dev->config;
+	const struct spi_dt_spec *spec = &config->spi;
+	struct pmw3389_data *data = dev->data;
+
+	// fetch_manual(spec, &data->delta_x, &data->delta_y);
+	fetch_burst(spec, &data->delta_x, &data->delta_y);
 
 	return 0;
 }
