@@ -26,8 +26,6 @@ LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 #define REG_Product_ID	    0x00
 #define Expected_Product_ID 0x47
 
-// TODO: Check timing interval vs delay
-
 // Min command interval of write commands
 #define T_SWW_US 180
 
@@ -43,6 +41,13 @@ LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 
 // Min delay between address and data bytes for burst motion read
 #define T_SRAD_MOTBR_US 35
+
+// Wait such that the time between last address bit of the next read and last data bit is
+// > T_SWR: Assume clock frequency is at the maximum of 2MHz -> 4us for 8 address bits
+#define DELAY_WRITE_WRITE (T_SWW_US - 8)
+#define DELAY_WRITE_READ  (T_SWR_US - 4)
+#define DELAY_READ_WRITE  T_SRW_US
+#define DELAY_READ_READ	  T_SRR_US
 
 /*
  * Chip SPI Interface description
@@ -76,6 +81,8 @@ struct pmw3389_data {
 
 /**
  * @param reg 7-bit register address
+ * @note: Delay by T_SWW-(write_time) until starting the next write, or T_SWR-(address_send_time)
+ *        until starting next read
  */
 void write_register(const struct spi_dt_spec *spec, uint8_t reg, uint8_t data)
 {
@@ -104,6 +111,21 @@ static uint8_t receive_byte(const struct spi_dt_spec *spec)
 
 	spi_read_dt(spec, &rx_buffer_set);
 	return data;
+}
+
+/**
+ * @param addr 7-bit register address
+ * @return Register contents
+ * @note Delay by T_SRR or T_SRW until starting the next read/write
+ */
+uint8_t read_register(const struct spi_dt_spec *spec, uint8_t addr)
+{
+	// Write address
+	send_byte(spec, addr & ~(1 << 7));
+	// Wait T_SRAD
+	k_busy_wait(T_SRAD_US);
+	// Read Data
+	return receive_byte(spec);
 }
 
 void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t *out)
@@ -136,15 +158,6 @@ void burst_read_motion(const struct device *dev, uint8_t burst_register, uint8_t
 	// TODO: t_SRAD etc
 }
 
-uint8_t read_register(const struct spi_dt_spec *spec, uint8_t addr)
-{
-	// Write address
-	send_byte(spec, addr & ~(1 << 7));
-	// Wait T_SRAD
-	k_busy_wait(T_SRAD_US);
-	// Read Data
-	return receive_byte(spec);
-}
 
 /**
  * Read multiple registers
@@ -156,7 +169,7 @@ void read_multiple(const struct spi_dt_spec *spec, const uint8_t addresses[], in
 		data_out[i] = read_register(spec, addresses[i]);
 		// Wait T_SRR if not last
 		if (i != nr_addresses - 1) {
-			k_busy_wait(T_SRR_US);
+			k_busy_wait(DELAY_READ_READ);
 		}
 	}
 
@@ -193,13 +206,10 @@ int pmw3389_init(const struct device *dev)
 
 	// 7. Write to register 0x3D with value 0x80.
 	// Last op was read if SROM DL was not performed -> wait T_SRW
-	k_busy_wait(T_SRW_US);
+	k_busy_wait(DELAY_READ_WRITE);
 	write_register(spec, 0x3D, 0x80);
 
-	// Wait such that the time between last address bit of the next read and last data bit is
-	// > T_SWR: Assume clock frequency is at the maximum of 2MHz -> 4us for 8 address bits
-	// The missing SRR here are waited in the first loop iteration below.
-	k_busy_wait(T_SWR_US - 4);
+	k_busy_wait(DELAY_WRITE_READ);
 
 	// 8. Read register 0x3D at 1ms interval until value 0xC0 is obtained or read up to
 	//    55ms. This register read interval must be carried out at 1ms interval with timing
@@ -215,13 +225,13 @@ int pmw3389_init(const struct device *dev)
 	}
 
 	// 9. Write to register 0x3D with value 0x00.
-	k_busy_wait(T_SRW_US);
+	k_busy_wait(DELAY_READ_WRITE);
 	write_register(spec, 0x3D, 0x00);
 
 	// 10. Write 0x20 to register 0x10
 	// 0x10 is Config2, 0x20=0b00100000 enables the REST mode and sets CPI to addect both X and
 	// Y
-	k_busy_wait(T_SWW_US - 4);
+	k_busy_wait(DELAY_WRITE_WRITE);
 	write_register(spec, 0x10, 0x20);
 
 	// 11. Load configuration for other registers.
@@ -231,20 +241,21 @@ int pmw3389_init(const struct device *dev)
 	if (config->resolution_cpi < 50 || config->resolution_cpi > 16000) {
 		LOG_ERR("Resolution of %d is out of range [%d, %d]", config->resolution_cpi, 50,
 			16000);
+		spi_release_dt(spec);
 		return -EINVAL;
 	}
 	if (config->resolution_cpi % 50 != 0) {
 		LOG_WRN("Resolution of %d is not a multiple of 50cpi!", config->resolution_cpi);
 	}
 	uint16_t resolution = config->resolution_cpi / 50;
-	k_busy_wait(T_SWW_US - 4);
+	k_busy_wait(DELAY_WRITE_WRITE);
 	write_register(spec, REG_Resolution_H, resolution >> 8);
-	k_busy_wait(T_SWW_US - 4);
+	k_busy_wait(DELAY_WRITE_WRITE);
 	write_register(spec, REG_Resolution_L, resolution & 0xFF);
 
 	// Verify communication
 	LOG_INF("Verifying communication by reading product ID");
-	k_busy_wait(T_SWR_US - 4);
+	k_busy_wait(DELAY_WRITE_READ);
 	uint8_t received_product_id = read_register(spec, REG_Product_ID);
 	if (received_product_id != Expected_Product_ID) {
 		LOG_ERR("Read product ID %#x, but expected %#x, could not verify communication "
@@ -284,14 +295,14 @@ int pmw3389_sample_fetch(const struct device *dev, enum sensor_channel chan)
 
 	// For first motion read, write any value to Motion register first (?)
 	write_register(spec, REG_Motion, 0x00);
-	k_busy_wait(T_SWR_US - 4);
+	k_busy_wait(DELAY_WRITE_READ);
 
 	uint8_t motion = read_register(spec, REG_Motion);
 	if (is_bit_set(motion, BIT_Motion_MOT)) {
 		// Motion has occurred!
 		uint8_t results[4] = {0};
 		uint8_t addresses[4] = {REG_Delta_X_L, REG_Delta_X_H, REG_Delta_Y_L, REG_Delta_Y_H};
-		k_busy_wait(T_SRR_US);
+		k_busy_wait(DELAY_READ_READ);
 		read_multiple(spec, addresses, 4, results);
 		data->delta_x = signed_16_from_parts(results[0], results[1]);
 		data->delta_y = signed_16_from_parts(results[2], results[3]);
