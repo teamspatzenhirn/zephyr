@@ -62,7 +62,7 @@ LOG_MODULE_REGISTER(pmw3389, LOG_LEVEL_INF);
 
 struct pmw3389_config {
 	struct spi_dt_spec spi;
-	int resolution_cpm; // [counts/m]
+	int resolution_cpi; // [counts/inch]
 };
 
 struct pmw3389_data {
@@ -291,7 +291,7 @@ int pmw3389_channel_get(const struct device *dev, enum sensor_channel chan,
 	const struct pmw3389_config *config = dev->config;
 	const struct pmw3389_data *data = dev->data;
 
-	int16_t counts = 0;
+	int16_t counts;
 
 	switch ((int)chan) {
 	case SENSOR_CHAN_PMW3389_DISTANCE_X:
@@ -304,17 +304,9 @@ int pmw3389_channel_get(const struct device *dev, enum sensor_channel chan,
 		return -ENOTSUP;
 	}
 
-	// TODO: fix conversion fuckups
-	val->val1 = counts / config->resolution_cpm;
-	val->val2 = (1000000 * counts / config->resolution_cpm) % 1000000;
-
-	/*
-	 * 	Max counts: 32767
-		Resolution: 50 CPI to 16000 CPI: 1968.505 to 629921.6 CPM
-		m/count: 0.000507999726 to 1.58749914e-6
-		µm/count: 507.999726 to 1.58749914
-		nm/count: 507999.726 to 1587.49914
-		*/
+	int conversion_err = sensor_value_from_double(
+		val, (double)counts / (39.3700787 * config->resolution_cpi));
+	assert(conversion_err == 0);
 
 	return 0;
 }
