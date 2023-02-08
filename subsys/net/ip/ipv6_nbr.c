@@ -592,11 +592,11 @@ struct net_nbr *net_ipv6_nbr_add(struct net_if *iface,
 	if (!nbr) {
 		NET_ERR("Could not add router neighbor %s [%s]",
 			net_sprint_ipv6_addr(addr),
-			net_sprint_ll_addr(lladdr->addr, lladdr->len));
+			lladdr ? net_sprint_ll_addr(lladdr->addr, lladdr->len) : "unknown");
 		return NULL;
 	}
 
-	if (net_nbr_link(nbr, iface, lladdr) == -EALREADY &&
+	if (lladdr && net_nbr_link(nbr, iface, lladdr) == -EALREADY &&
 	    net_ipv6_nbr_data(nbr)->state != NET_IPV6_NBR_STATE_STATIC) {
 		/* Update the lladdr if the node was already known */
 		struct net_linkaddr_storage *cached_lladdr;
@@ -629,7 +629,7 @@ struct net_nbr *net_ipv6_nbr_add(struct net_if *iface,
 	NET_DBG("[%d] nbr %p state %d router %d IPv6 %s ll %s iface %p/%d",
 		nbr->idx, nbr, state, is_router,
 		net_sprint_ipv6_addr(addr),
-		net_sprint_ll_addr(lladdr->addr, lladdr->len),
+		lladdr ? net_sprint_ll_addr(lladdr->addr, lladdr->len) : "[unknown]",
 		nbr->iface, net_if_get_by_iface(nbr->iface));
 
 #if defined(CONFIG_NET_MGMT_EVENT_INFO)
@@ -1104,6 +1104,7 @@ int net_ipv6_send_na(struct net_if *iface, const struct in6_addr *src,
 		goto drop;
 	}
 
+	net_stats_update_icmp_sent(net_pkt_iface(pkt));
 	net_stats_update_ipv6_nd_sent(iface);
 
 	return 0;
@@ -1815,8 +1816,6 @@ static enum net_verdict handle_na_input(struct net_pkt *pkt,
 		goto drop;
 	}
 
-	net_stats_update_ipv6_nd_sent(net_pkt_iface(pkt));
-
 	net_pkt_unref(pkt);
 
 	return NET_OK;
@@ -1954,6 +1953,7 @@ int net_ipv6_send_ns(struct net_if *iface,
 		goto drop;
 	}
 
+	net_stats_update_icmp_sent(net_pkt_iface(pkt));
 	net_stats_update_ipv6_nd_sent(iface);
 
 	return 0;
@@ -2025,6 +2025,7 @@ int net_ipv6_send_rs(struct net_if *iface)
 		goto drop;
 	}
 
+	net_stats_update_icmp_sent(net_pkt_iface(pkt));
 	net_stats_update_ipv6_nd_sent(iface);
 
 	return 0;
@@ -2393,11 +2394,19 @@ static enum net_verdict handle_ra_input(struct net_pkt *pkt,
 
 	nd_opt_hdr = (struct net_icmpv6_nd_opt_hdr *)
 				net_pkt_get_data(pkt, &nd_access);
+
+	/* Add neighbor cache entry using link local address, regardless of link layer address
+	 * presence in Router Advertisement.
+	 */
+	nbr = net_ipv6_nbr_add(net_pkt_iface(pkt), (struct in6_addr *)NET_IPV6_HDR(pkt)->src, NULL,
+				true, NET_IPV6_NBR_STATE_INCOMPLETE);
+
 	while (nd_opt_hdr) {
 		net_pkt_acknowledge_data(pkt, &nd_access);
 
 		switch (nd_opt_hdr->type) {
 		case NET_ICMPV6_ND_OPT_SLLAO:
+			/* Update existing neighbor cache entry with link layer address. */
 			nbr = handle_ra_neighbor(pkt, nd_opt_hdr->len);
 			if (!nbr) {
 				goto drop;

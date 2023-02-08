@@ -15,4 +15,19 @@ config HAS_XMCLIB_UART
 	help
 	  Enable XMCLIB Universal asynchronous receiver transmitter (UART)
 
+config HAS_XMCLIB_FLASH
+	bool
+	help
+	  Enable XMCLIB Flash
+
+config HAS_XMCLIB_ERU
+	bool
+	help
+	  Enable XMCLIB Event Request Unit (ERU) for GPIO interrupt support
+
+config HAS_XMCLIB_VADC
+	bool
+	help
+	  Enable XMCLIB VADC
+
 endif # HAS_XMCLIB

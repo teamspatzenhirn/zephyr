@@ -29,6 +29,7 @@ LOG_MODULE_REGISTER(net_dhcpv4, CONFIG_NET_DHCPV4_LOG_LEVEL);
 
 #include "dhcpv4.h"
 #include "ipv4.h"
+#include "net_stats.h"
 
 #define PKT_WAIT_TIME K_SECONDS(1)
 
@@ -353,6 +354,8 @@ static uint32_t dhcpv4_send_request(struct net_if *iface)
 	case NET_DHCPV4_REQUESTING:
 		with_server_id = true;
 		with_requested_ip = true;
+		memcpy(&iface->config.dhcpv4.request_server_addr, &iface->config.dhcpv4.server_id,
+		       sizeof(struct in_addr));
 		break;
 	case NET_DHCPV4_RENEWING:
 		/* Since we have an address populate the ciaddr field.
@@ -388,6 +391,8 @@ static uint32_t dhcpv4_send_request(struct net_if *iface)
 	if (net_send_data(pkt) < 0) {
 		goto fail;
 	}
+
+	net_stats_update_udp_sent(iface);
 
 	NET_DBG("send request dst=%s xid=0x%x ciaddr=%s%s%s timeout=%us",
 		net_sprint_ipv4_addr(server_addr),
@@ -426,6 +431,8 @@ static uint32_t dhcpv4_send_discover(struct net_if *iface)
 	if (net_send_data(pkt) < 0) {
 		goto fail;
 	}
+
+	net_stats_update_udp_sent(iface);
 
 	timeout = dhcpv4_update_message_timeout(&iface->config.dhcpv4);
 
@@ -515,12 +522,15 @@ static uint32_t dhcpv4_rebinding_timeleft(struct net_if *iface, int64_t now)
 	return rem;
 }
 
-static void dhcpv4_enter_requesting(struct net_if *iface)
+static void dhcpv4_enter_requesting(struct net_if *iface, struct dhcp_msg *msg)
 {
 	iface->config.dhcpv4.attempts = 0U;
 	iface->config.dhcpv4.state = NET_DHCPV4_REQUESTING;
 	NET_DBG("enter state=%s",
 		net_dhcpv4_state_name(iface->config.dhcpv4.state));
+
+	memcpy(iface->config.dhcpv4.requested_ip.s4_addr,
+	       msg->yiaddr, sizeof(msg->yiaddr));
 
 	dhcpv4_send_request(iface);
 }
@@ -568,6 +578,13 @@ static uint32_t dhcpv4_manage_timers(struct net_if *iface, int64_t now)
 
 	if (timeleft != 0U) {
 		return timeleft;
+	}
+
+	if (!net_if_is_up(iface)) {
+		/* An interface is down, the registered event handler will
+		 * restart DHCP procedure when the interface is back up.
+		 */
+		return UINT32_MAX;
 	}
 
 	switch (iface->config.dhcpv4.state) {
@@ -885,7 +902,8 @@ end:
 	return true;
 }
 
-static inline void dhcpv4_handle_msg_offer(struct net_if *iface)
+static inline void dhcpv4_handle_msg_offer(struct net_if *iface,
+					   struct dhcp_msg *msg)
 {
 	switch (iface->config.dhcpv4.state) {
 	case NET_DHCPV4_DISABLED:
@@ -896,7 +914,7 @@ static inline void dhcpv4_handle_msg_offer(struct net_if *iface)
 	case NET_DHCPV4_BOUND:
 		break;
 	case NET_DHCPV4_SELECTING:
-		dhcpv4_enter_requesting(iface);
+		dhcpv4_enter_requesting(iface, msg);
 		break;
 	}
 }
@@ -941,11 +959,27 @@ static void dhcpv4_handle_msg_nak(struct net_if *iface)
 	case NET_DHCPV4_DISABLED:
 	case NET_DHCPV4_INIT:
 	case NET_DHCPV4_SELECTING:
-	case NET_DHCPV4_RENEWING:
+	case NET_DHCPV4_REQUESTING:
+		if (memcmp(&iface->config.dhcpv4.request_server_addr,
+			   &iface->config.dhcpv4.response_src_addr,
+			   sizeof(iface->config.dhcpv4.request_server_addr)) == 0) {
+			LOG_DBG("NAK from requesting server %s, restart config",
+				net_sprint_ipv4_addr(&iface->config.dhcpv4.request_server_addr));
+			dhcpv4_enter_selecting(iface);
+		} else {
+			LOG_DBG("NAK from non-requesting server %s, ignore it",
+				net_sprint_ipv4_addr(&iface->config.dhcpv4.response_src_addr));
+		}
+		break;
 	case NET_DHCPV4_BOUND:
 		break;
-	case NET_DHCPV4_REQUESTING:
+	case NET_DHCPV4_RENEWING:
 	case NET_DHCPV4_REBINDING:
+		if (!net_if_ipv4_addr_rm(iface,
+					 &iface->config.dhcpv4.requested_ip)) {
+			NET_DBG("Failed to remove addr from iface");
+		}
+
 		/* Restart the configuration process. */
 		dhcpv4_enter_selecting(iface);
 		break;
@@ -954,7 +988,8 @@ static void dhcpv4_handle_msg_nak(struct net_if *iface)
 
 /* Takes and releases lock */
 static void dhcpv4_handle_reply(struct net_if *iface,
-				enum dhcpv4_msg_type msg_type)
+				enum dhcpv4_msg_type msg_type,
+				struct dhcp_msg *msg)
 {
 	NET_DBG("state=%s msg=%s",
 		net_dhcpv4_state_name(iface->config.dhcpv4.state),
@@ -962,7 +997,7 @@ static void dhcpv4_handle_reply(struct net_if *iface,
 
 	switch (msg_type) {
 	case DHCPV4_MSG_TYPE_OFFER:
-		dhcpv4_handle_msg_offer(iface);
+		dhcpv4_handle_msg_offer(iface, msg);
 		break;
 	case DHCPV4_MSG_TYPE_ACK:
 		dhcpv4_handle_msg_ack(iface);
@@ -1055,9 +1090,6 @@ static enum net_verdict net_dhcpv4_input(struct net_conn *conn,
 		goto drop;
 	}
 
-	memcpy(iface->config.dhcpv4.requested_ip.s4_addr,
-	       msg->yiaddr, sizeof(msg->yiaddr));
-
 	net_pkt_acknowledge_data(pkt, &dhcp_access);
 
 	/* SNAME, FILE are not used at the moment, skip it */
@@ -1070,9 +1102,12 @@ static enum net_verdict net_dhcpv4_input(struct net_conn *conn,
 		goto drop;
 	}
 
-	net_pkt_unref(pkt);
+	memcpy(&iface->config.dhcpv4.response_src_addr, ip_hdr->ipv4->src,
+		       sizeof(struct in_addr));
 
-	dhcpv4_handle_reply(iface, msg_type);
+	dhcpv4_handle_reply(iface, msg_type, msg);
+
+	net_pkt_unref(pkt);
 
 	verdict = NET_OK;
 

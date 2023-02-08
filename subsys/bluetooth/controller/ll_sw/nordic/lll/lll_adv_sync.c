@@ -21,6 +21,8 @@
 #include "util/memq.h"
 #include "util/dbuf.h"
 
+#include "pdu_df.h"
+#include "pdu_vendor.h"
 #include "pdu.h"
 
 #include "lll.h"
@@ -39,9 +41,6 @@
 #include "lll_prof_internal.h"
 #include "lll_df_internal.h"
 
-#define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
-#define LOG_MODULE_NAME bt_ctlr_lll_adv_sync
-#include "common/log.h"
 #include "hal/debug.h"
 
 static int init_reset(void);
@@ -313,8 +312,7 @@ static void isr_done(void *param)
 		rx->type = NODE_RX_TYPE_SYNC_CHM_COMPLETE;
 		rx->rx_ftr.param = lll;
 
-		ull_rx_put(rx->link, rx);
-		ull_rx_sched();
+		ull_rx_put_sched(rx->link, rx);
 	}
 
 	lll_isr_done(lll);
@@ -399,7 +397,8 @@ static void isr_tx(void *param)
 	}
 }
 
-static void switch_radio_complete_and_b2b_tx(const struct lll_adv_sync *lll, uint8_t phy_s)
+static void switch_radio_complete_and_b2b_tx(const struct lll_adv_sync *lll,
+					     uint8_t phy_s)
 {
 #if defined(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
 	if (lll->cte_started) {

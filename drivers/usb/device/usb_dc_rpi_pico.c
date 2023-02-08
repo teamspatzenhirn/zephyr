@@ -10,9 +10,11 @@
 #include <hardware/structs/usb.h>
 #include <hardware/resets.h>
 
+#include <zephyr/kernel.h>
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/irq.h>
 
 LOG_MODULE_REGISTER(udc_rpi, CONFIG_USB_DRIVER_LOG_LEVEL);
 
@@ -135,7 +137,7 @@ static void udc_rpi_handle_buff_status(void)
 {
 	struct udc_rpi_ep_state *ep_state;
 	enum usb_dc_ep_cb_status_code status_code;
-	uint8_t status = usb_hw->buf_status;
+	uint32_t status = usb_hw->buf_status;
 	unsigned int bit = 1U;
 	struct cb_msg msg;
 
@@ -231,6 +233,30 @@ static void udc_rpi_isr(const void *arg)
 		LOG_WRN("data seq");
 		hw_clear_alias(usb_hw)->sie_status = USB_SIE_STATUS_DATA_SEQ_ERROR_BITS;
 		handled |= USB_INTS_ERROR_DATA_SEQ_BITS;
+	}
+
+	if (status & USB_INTS_ERROR_RX_TIMEOUT_BITS) {
+		LOG_WRN("rx timeout");
+		hw_clear_alias(usb_hw)->sie_status = USB_SIE_STATUS_RX_TIMEOUT_BITS;
+		handled |= USB_INTS_ERROR_RX_TIMEOUT_BITS;
+	}
+
+	if (status & USB_INTS_ERROR_RX_OVERFLOW_BITS) {
+		LOG_WRN("rx overflow");
+		hw_clear_alias(usb_hw)->sie_status = USB_SIE_STATUS_RX_OVERFLOW_BITS;
+		handled |= USB_INTS_ERROR_RX_OVERFLOW_BITS;
+	}
+
+	if (status & USB_INTS_ERROR_BIT_STUFF_BITS) {
+		LOG_WRN("bit stuff error");
+		hw_clear_alias(usb_hw)->sie_status = USB_SIE_STATUS_BIT_STUFF_ERROR_BITS;
+		handled |= USB_INTS_ERROR_BIT_STUFF_BITS;
+	}
+
+	if (status & USB_INTS_ERROR_CRC_BITS) {
+		LOG_ERR("crc error");
+		hw_clear_alias(usb_hw)->sie_status = USB_SIE_STATUS_CRC_ERROR_BITS;
+		handled |= USB_INTS_ERROR_CRC_BITS;
 	}
 
 	if (status ^ handled) {

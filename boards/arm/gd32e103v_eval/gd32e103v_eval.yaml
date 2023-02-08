@@ -11,3 +11,7 @@ toolchain:
   - zephyr
   - gnuarmemb
   - xtools
+supported:
+  - counter
+  - watchdog
+  - dma

@@ -1094,6 +1094,9 @@ struct bt_le_ext_adv_info {
 
 	/** Currently selected Transmit Power (dBM). */
 	int8_t                     tx_power;
+
+	/** Current local advertising address used. */
+	const bt_addr_le_t         *addr;
 };
 
 /**
@@ -1417,6 +1420,20 @@ struct bt_le_per_adv_sync_param {
  */
 uint8_t bt_le_per_adv_sync_get_index(struct bt_le_per_adv_sync *per_adv_sync);
 
+/**
+ * @brief Get a periodic advertising sync object from the array index.
+ *
+ * This function is to get the periodic advertising sync object from
+ * the array index.
+ * The array has CONFIG_BT_PER_ADV_SYNC_MAX elements.
+ *
+ * @param index The index of the periodic advertising sync object.
+ *              The range of the index value is 0..CONFIG_BT_PER_ADV_SYNC_MAX-1
+ *
+ * @return The periodic advertising sync object of the array index or NULL if invalid index.
+ */
+struct bt_le_per_adv_sync *bt_le_per_adv_sync_lookup_index(uint8_t index);
+
 /** @brief Advertising set info structure. */
 struct bt_le_per_adv_sync_info {
 	/** Periodic Advertiser Address */
@@ -1552,6 +1569,22 @@ enum {
 
 	/** Only sync to packets with constant tone extension */
 	BT_LE_PER_ADV_SYNC_TRANSFER_OPT_SYNC_ONLY_CTE = BIT(3),
+
+	/**
+	 * @brief Sync to received PAST packets but don't generate sync reports
+	 *
+	 * This option must not be set at the same time as
+	 * @ref BT_LE_PER_ADV_SYNC_TRANSFER_OPT_FILTER_DUPLICATES.
+	 */
+	BT_LE_PER_ADV_SYNC_TRANSFER_OPT_REPORTING_INITIALLY_DISABLED = BIT(4),
+
+	/**
+	 * @brief Sync to received PAST packets and generate sync reports with duplicate filtering
+	 *
+	 * This option must not be set at the same time as
+	 * @ref BT_LE_PER_ADV_SYNC_TRANSFER_OPT_REPORTING_INITIALLY_DISABLED.
+	 */
+	BT_LE_PER_ADV_SYNC_TRANSFER_OPT_FILTER_DUPLICATES = BIT(5),
 };
 
 struct bt_le_per_adv_sync_transfer_param {

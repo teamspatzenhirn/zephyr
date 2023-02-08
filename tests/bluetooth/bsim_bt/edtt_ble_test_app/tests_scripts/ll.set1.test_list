@@ -35,7 +35,7 @@ LL/CON/CEN/BV-21-C
 LL/CON/CEN/BV-23-C
 LL/CON/CEN/BV-24-C
 LL/CON/CEN/BV-25-C
-LL/CON/CEN/BV-26-C
+#LL/CON/CEN/BV-26-C # This test case is not valid, and will fail with CPR cache
 LL/CON/CEN/BV-27-C
 LL/CON/CEN/BV-29-C
 LL/CON/CEN/BV-30-C
@@ -45,10 +45,10 @@ LL/CON/CEN/BV-41-C
 LL/CON/CEN/BV-43-C
 ## With updated EDTT, this now fails due to error in legacy DLE handling. Fixed in refactored LLCP
 #LL/CON/CEN/BV-73-C
-LL/CON/CEN/BV-74-C
+#LL/CON/CEN/BV-74-C # Needs testcase implementation update
 ## With updated EDTT, this now fails due to error in legacy DLE handling. Fixed in refactored LLCP
 #LL/CON/CEN/BV-76-C
-LL/CON/CEN/BV-77-C
+#LL/CON/CEN/BV-77-C # Needs testcase implementation update
 LL/CON/PER/BI-08-C
 LL/CON/PER/BV-04-C
 LL/CON/PER/BV-05-C

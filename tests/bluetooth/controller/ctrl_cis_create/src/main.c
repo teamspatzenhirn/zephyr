@@ -19,6 +19,8 @@
 #include "util/memq.h"
 #include "util/dbuf.h"
 
+#include "pdu_df.h"
+#include "lll/pdu_vendor.h"
 #include "pdu.h"
 #include "ll.h"
 #include "ll_settings.h"
@@ -203,9 +205,6 @@ static void test_cc_create_periph_rem_host_accept(void)
 
 	/* Done */
 	event_done(&conn);
-
-	/* There should NOT be a host notification */
-	ut_rx_q_is_empty();
 
 	/* Prepare */
 	event_prepare(&conn);

@@ -508,6 +508,21 @@ struct bt_hci_write_local_name {
 	uint8_t local_name[248];
 } __packed;
 
+#define BT_HCI_OP_READ_CONN_ACCEPT_TIMEOUT      BT_OP(BT_OGF_BASEBAND, 0x0015)
+struct bt_hci_rp_read_conn_accept_timeout {
+	uint8_t  status;
+	uint16_t conn_accept_timeout;
+} __packed;
+
+#define BT_HCI_OP_WRITE_CONN_ACCEPT_TIMEOUT     BT_OP(BT_OGF_BASEBAND, 0x0016)
+struct bt_hci_cp_write_conn_accept_timeout {
+	uint16_t conn_accept_timeout;
+} __packed;
+
+struct bt_hci_rp_write_conn_accept_timeout {
+	uint8_t  status;
+} __packed;
+
 #define BT_HCI_OP_WRITE_PAGE_TIMEOUT            BT_OP(BT_OGF_BASEBAND, 0x0018)
 
 #define BT_HCI_OP_WRITE_SCAN_ENABLE             BT_OP(BT_OGF_BASEBAND, 0x001a)
@@ -703,7 +718,6 @@ struct bt_hci_rp_read_bd_addr {
 #define BT_HCI_DATAPATH_ID_HCI      0x00
 #define BT_HCI_DATAPATH_ID_VS       0x01
 #define BT_HCI_DATAPATH_ID_VS_END   0xfe
-#define BT_HCI_DATAPATH_ID_DISABLED 0xff
 
 /* coding format assigned numbers, used for codec IDs */
 #define BT_HCI_CODING_FORMAT_ULAW_LOG    0x00
@@ -1751,9 +1765,10 @@ struct bt_hci_rp_le_per_adv_set_info_transfer {
 	uint16_t conn_handle;
 } __packed;
 
-#define BT_HCI_LE_PAST_MODE_NO_SYNC              0x00
-#define BT_HCI_LE_PAST_MODE_NO_REPORTS           0x01
-#define BT_HCI_LE_PAST_MODE_SYNC                 0x02
+#define BT_HCI_LE_PAST_MODE_NO_SYNC                0x00
+#define BT_HCI_LE_PAST_MODE_NO_REPORTS             0x01
+#define BT_HCI_LE_PAST_MODE_SYNC                   0x02
+#define BT_HCI_LE_PAST_MODE_SYNC_FILTER_DUPLICATES 0x03
 
 #define BT_HCI_LE_PAST_CTE_TYPE_NO_AOA           BIT(0)
 #define BT_HCI_LE_PAST_CTE_TYPE_NO_AOD_1US       BIT(1)

@@ -187,8 +187,11 @@
  */
 #define Z_DECL_ALIGN(type) __aligned(__alignof(type)) type
 
+/* Check if a pointer is aligned for against a specific byte boundary  */
+#define IS_PTR_ALIGNED_BYTES(ptr, bytes) ((((uintptr_t)ptr) % bytes) == 0)
+
 /* Check if a pointer is aligned enough for a particular data type. */
-#define IS_PTR_ALIGNED(ptr, type) ((((uintptr_t)ptr) % __alignof(type)) == 0)
+#define IS_PTR_ALIGNED(ptr, type) IS_PTR_ALIGNED_BYTES(ptr, __alignof(type))
 
 /**
  * @brief Iterable Sections APIs
@@ -197,7 +200,7 @@
  */
 
 /**
- * @brief Defines a new iterable section.
+ * @brief Defines a new element for an iterable section.
  *
  * @details
  * Convenience helper combining __in_section() and Z_DECL_ALIGN().
@@ -206,13 +209,16 @@
  *
  * In the linker script, create output sections for these using
  * ITERABLE_SECTION_ROM() or ITERABLE_SECTION_RAM().
+ *
+ * @note In order to store the element in ROM, a const specifier has to
+ * be added to the declaration: const STRUCT_SECTION_ITERABLE(...);
  */
 #define STRUCT_SECTION_ITERABLE(struct_type, name) \
 	Z_DECL_ALIGN(struct struct_type) name \
 	__in_section(_##struct_type, static, name) __used __noasan
 
 /**
- * @brief Defines an alternate data type iterable section.
+ * @brief Defines a new element of alternate data type for an iterable section.
  *
  * @details
  * Special variant of STRUCT_SECTION_ITERABLE(), for placing alternate

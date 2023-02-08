@@ -51,13 +51,7 @@ extern void z_arm_nmi_init(void);
 #error "Unknown nRF53 SoC."
 #endif
 
-#if DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_gpio_forwarder) && \
-	defined(CONFIG_BOARD_ENABLE_CPUNET) && \
-	(!defined(CONFIG_TRUSTED_EXECUTION_NONSECURE) || defined(CONFIG_BUILD_WITH_TFM))
-#define NRF_GPIO_FORWARDER_FOR_NRF5340_CPUAPP_ENABLED
-#endif
-
-#if defined(NRF_GPIO_FORWARDER_FOR_NRF5340_CPUAPP_ENABLED)
+#if defined(CONFIG_SOC_NRF_GPIO_FORWARDER_FOR_NRF5340)
 #define GPIOS_PSEL_BY_IDX(node_id, prop, idx) \
 	NRF_DT_GPIOS_TO_PSEL_BY_IDX(node_id, prop, idx),
 #define ALL_GPIOS_IN_NODE(node_id) \
@@ -140,16 +134,27 @@ static int nordicsemi_nrf53_init(const struct device *arg)
 #if defined(CONFIG_SOC_HFXO_CAP_INTERNAL)
 	/* This register is only accessible from secure code. */
 	uint32_t xosc32mtrim = soc_secure_read_xosc32mtrim();
+	/* The SLOPE field is in the two's complement form, hence this special
+	 * handling. Ideally, it would result in just one SBFX instruction for
+	 * extracting the slope value, at least gcc is capable of producing such
+	 * output, but since the compiler apparently tries first to optimize
+	 * additions and subtractions, it generates slightly less than optimal
+	 * code.
+	 */
+	uint32_t slope_field = (xosc32mtrim & FICR_XOSC32MTRIM_SLOPE_Msk)
+			       >> FICR_XOSC32MTRIM_SLOPE_Pos;
+	uint32_t slope_mask = FICR_XOSC32MTRIM_SLOPE_Msk
+			      >> FICR_XOSC32MTRIM_SLOPE_Pos;
+	uint32_t slope_sign = (slope_mask - (slope_mask >> 1));
+	int32_t slope = (int32_t)(slope_field ^ slope_sign) - (int32_t)slope_sign;
+	uint32_t offset = (xosc32mtrim & FICR_XOSC32MTRIM_OFFSET_Msk)
+			  >> FICR_XOSC32MTRIM_OFFSET_Pos;
 	/* As specified in the nRF5340 PS:
 	 * CAPVALUE = (((FICR->XOSC32MTRIM.SLOPE+56)*(CAPACITANCE*2-14))
 	 *            +((FICR->XOSC32MTRIM.OFFSET-8)<<4)+32)>>6;
 	 * where CAPACITANCE is the desired capacitor value in pF, holding any
 	 * value between 7.0 pF and 20.0 pF in 0.5 pF steps.
 	 */
-	uint32_t slope = (xosc32mtrim & FICR_XOSC32MTRIM_SLOPE_Msk)
-			 >> FICR_XOSC32MTRIM_SLOPE_Pos;
-	uint32_t offset = (xosc32mtrim & FICR_XOSC32MTRIM_OFFSET_Msk)
-			  >> FICR_XOSC32MTRIM_OFFSET_Pos;
 	uint32_t capvalue =
 		((slope + 56) * (CONFIG_SOC_HFXO_CAP_INT_VALUE_X2 - 14)
 		 + ((offset - 8) << 4) + 32) >> 6;
@@ -169,7 +174,7 @@ static int nordicsemi_nrf53_init(const struct device *arg)
 	nrf_regulators_dcdcen_vddh_set(NRF_REGULATORS, true);
 #endif
 
-#if defined(NRF_GPIO_FORWARDER_FOR_NRF5340_CPUAPP_ENABLED)
+#if defined(CONFIG_SOC_NRF_GPIO_FORWARDER_FOR_NRF5340)
 	static const uint8_t forwarded_psels[] = {
 		DT_FOREACH_STATUS_OKAY(nordic_nrf_gpio_forwarder, ALL_GPIOS_IN_FORWARDER)
 	};
